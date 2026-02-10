@@ -2,6 +2,7 @@ import {
   AspectRatio as AspectRatioIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
+  Height as HeightIcon,
   RestartAlt as RestartAltIcon,
   RotateLeft as RotateLeftIcon,
   RotateRight as RotateRightIcon,
@@ -26,14 +27,13 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import ReactCrop, { centerCrop, convertToPixelCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { canvasPreview } from '../common/canvasPreview';
 import { useDebounceEffect } from '../common/useDebounceEffect';
 
-// This is to demonstrate how to make and center a % aspect crop
-// which is a bit trickier so we use some helper functions.
+// Helper functions
 function centerAspectCrop(mediaWidth, mediaHeight, aspect) {
   return centerCrop(
     makeAspectCrop(
@@ -71,6 +71,11 @@ export default function ImageEditorCropper() {
   const [rotate, setRotate] = useState(0);
   const [aspect, setAspect] = useState(undefined);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // New state for container resizing
+  const [containerHeight, setContainerHeight] = useState(400); // Initial height in px
+  const [isResizing, setIsResizing] = useState(false);
+  const containerRef = useRef(null);
 
   function onSelectFile(e) {
     if (e.target.files && e.target.files.length > 0) {
@@ -152,6 +157,7 @@ export default function ImageEditorCropper() {
     setAspect(undefined);
     setCrop(null);
     setCompletedCrop(null);
+    setContainerHeight(400); // Reset container height
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -175,7 +181,6 @@ export default function ImageEditorCropper() {
   const handleRotate = (direction) => {
     setRotate((prev) => {
       const newValue = direction === 'left' ? prev - 90 : prev + 90;
-      // Keep rotation within -180 to 180 degrees
       return ((newValue + 180) % 360) - 180;
     });
   };
@@ -183,7 +188,7 @@ export default function ImageEditorCropper() {
   const handleZoom = (direction) => {
     setScale((prev) => {
       const newValue = direction === 'in' ? prev + 0.1 : prev - 0.1;
-      return Math.min(Math.max(0.1, newValue), 3); // Limit between 0.1x and 3x
+      return Math.min(Math.max(0.1, newValue), 3);
     });
   };
 
@@ -195,13 +200,51 @@ export default function ImageEditorCropper() {
     }
   };
 
+  // Handle container resize with mouse
+  const handleResizeStart = useCallback(
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsResizing(true);
+
+      const startY = e.clientY || e.touches[0].clientY;
+      const startHeight = containerHeight;
+
+      const handleMouseMove = (moveEvent) => {
+        const currentY = moveEvent.clientY || moveEvent.touches[0].clientY;
+        const deltaY = currentY - startY;
+        const newHeight = Math.max(200, Math.min(800, startHeight + deltaY)); // Min 200px, Max 800px
+        setContainerHeight(newHeight);
+      };
+
+      const handleMouseUp = () => {
+        setIsResizing(false);
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('touchmove', handleMouseMove);
+        document.removeEventListener('touchend', handleMouseUp);
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.addEventListener('touchmove', handleMouseMove);
+      document.addEventListener('touchend', handleMouseUp);
+    },
+    [containerHeight]
+  );
+
+  // Handle container resize with slider
+  const handleContainerHeightChange = (value) => {
+    setContainerHeight(Math.max(200, Math.min(800, value)));
+  };
+
   return (
     <Box sx={{ p: 3, maxWidth: '1400px', margin: '0 auto' }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 600, color: 'primary.main' }}>
-        Image Editor
+        Image Editor with Resizable Container
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Upload, crop, rotate, and scale your images with precision
+        Drag the bottom border of the image container to resize it vertically
       </Typography>
 
       <Card elevation={3} sx={{ mt: 3 }}>
@@ -226,31 +269,28 @@ export default function ImageEditorCropper() {
                   )}
                 </Box>
 
-                {/* Image Info */}
+                {/* Container Height Control */}
                 {imgSrc && (
                   <Box>
                     <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                      Image Info
+                      Container Height: {containerHeight}px
                     </Typography>
-                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover' }}>
-                      <Stack spacing={1}>
-                        <Typography variant="body2">
-                          Scale: <Chip label={`${scale.toFixed(1)}x`} size="small" />
-                        </Typography>
-                        <Typography variant="body2">
-                          Rotation: <Chip label={`${rotate}°`} size="small" />
-                        </Typography>
-                        {completedCrop && (
-                          <Typography variant="body2">
-                            Crop Size:{' '}
-                            <Chip
-                              label={`${Math.round(completedCrop.width)}x${Math.round(completedCrop.height)}`}
-                              size="small"
-                            />
-                          </Typography>
-                        )}
-                      </Stack>
-                    </Paper>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <HeightIcon color="action" />
+                      <Slider
+                        value={containerHeight}
+                        onChange={(_, value) => handleContainerHeightChange(value)}
+                        min={200}
+                        max={800}
+                        step={10}
+                        disabled={!imgSrc}
+                        sx={{ flex: 1 }}
+                      />
+                      <HeightIcon color="action" sx={{ transform: 'rotate(180deg)' }} />
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                      Or drag the bottom border of the image container
+                    </Typography>
                   </Box>
                 )}
 
@@ -365,16 +405,32 @@ export default function ImageEditorCropper() {
             {/* Right Panel - Image and Preview */}
             <Grid item xs={12} md={8}>
               <Stack spacing={3}>
-                {/* Main Image Editor */}
+                {/* Main Image Editor with Resizable Container */}
                 {imgSrc ? (
-                  <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+                  <Box
+                    ref={containerRef}
+                    sx={{
+                      border: 1,
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                      overflow: 'hidden',
+                      position: 'relative',
+                      height: `${containerHeight}px`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: 'background.default',
+                      transition: isResizing ? 'none' : 'height 0.2s ease',
+                      cursor: 'default',
+                    }}
+                  >
                     <ReactCrop
                       crop={crop}
                       onChange={(_, percentCrop) => setCrop(percentCrop)}
                       onComplete={(c) => setCompletedCrop(c)}
                       aspect={aspect}
-                      minHeight={100}
-                      minWidth={100}
+                      minHeight={50}
+                      minWidth={50}
                       keepSelection
                     >
                       <img
@@ -384,11 +440,84 @@ export default function ImageEditorCropper() {
                         style={{
                           transform: `scale(${scale}) rotate(${rotate}deg)`,
                           maxWidth: '100%',
+                          maxHeight: '100%',
                           display: 'block',
                         }}
                         onLoad={onImageLoad}
                       />
                     </ReactCrop>
+
+                    {/* Resize Handle - Bottom Border */}
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: '8px',
+                        backgroundColor: isResizing ? 'primary.main' : 'grey.400',
+                        cursor: 'ns-resize',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        '&:hover': {
+                          backgroundColor: 'primary.main',
+                        },
+                        '&:active': {
+                          backgroundColor: 'primary.dark',
+                        },
+                      }}
+                      onMouseDown={handleResizeStart}
+                      onTouchStart={handleResizeStart}
+                    >
+                      <Box
+                        sx={{
+                          width: '40px',
+                          height: '4px',
+                          backgroundColor: 'white',
+                          borderRadius: '2px',
+                        }}
+                      />
+                    </Box>
+
+                    {/* Resize Handle Label */}
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        bottom: 12,
+                        right: 12,
+                        backgroundColor: 'rgba(0,0,0,0.7)',
+                        color: 'white',
+                        px: 1.5,
+                        py: 0.5,
+                        borderRadius: 1,
+                        fontSize: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5,
+                      }}
+                    >
+                      <HeightIcon sx={{ fontSize: '0.875rem' }} />
+                      {containerHeight}px
+                    </Box>
+
+                    {/* Resize Instructions */}
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: 10,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        backgroundColor: 'rgba(0,0,0,0.7)',
+                        color: 'white',
+                        px: 2,
+                        py: 0.5,
+                        borderRadius: 1,
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      Drag bottom border to resize container
+                    </Box>
                   </Box>
                 ) : (
                   <Paper
@@ -399,6 +528,11 @@ export default function ImageEditorCropper() {
                       border: '2px dashed',
                       borderColor: 'divider',
                       bgcolor: 'action.hover',
+                      height: '400px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
                     <UploadIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
@@ -415,7 +549,7 @@ export default function ImageEditorCropper() {
                 {completedCrop && (
                   <Box>
                     <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                      Preview
+                      Cropped Preview
                     </Typography>
                     <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
                       <Stack spacing={2} alignItems="center">
@@ -426,6 +560,9 @@ export default function ImageEditorCropper() {
                             borderRadius: 1,
                             overflow: 'hidden',
                             bgcolor: 'white',
+                            width: '100%',
+                            display: 'flex',
+                            justifyContent: 'center',
                           }}
                         >
                           <canvas
@@ -438,7 +575,7 @@ export default function ImageEditorCropper() {
                           />
                         </Box>
                         <Typography variant="caption" color="text.secondary" align="center">
-                          Cropped preview (actual image quality will be higher)
+                          Final output: {Math.round(completedCrop.width)} × {Math.round(completedCrop.height)} pixels
                         </Typography>
                       </Stack>
                     </Paper>
@@ -462,7 +599,7 @@ export default function ImageEditorCropper() {
             Clear
           </Button>
           <Button startIcon={<RestartAltIcon />} onClick={handleReset} disabled={!imgSrc} variant="outlined">
-            Reset
+            Reset All
           </Button>
           <Button
             startIcon={<DownloadIcon />}
@@ -480,8 +617,16 @@ export default function ImageEditorCropper() {
       {/* Help Text */}
       <Alert severity="info" sx={{ mt: 2 }}>
         <Typography variant="body2">
-          <strong>Tips:</strong> Drag to move the crop area, drag edges to resize. Use aspect ratio presets for specific
-          dimensions. The downloaded image will be in PNG format with high quality.
+          <strong>Container Resize Features:</strong>
+          <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
+            <li>
+              Drag the <strong>bottom border</strong> (grey/blue bar) up/down to resize container height
+            </li>
+            <li>Use the height slider in the controls panel for precise adjustment</li>
+            <li>Works with both mouse and touch devices</li>
+            <li>Container height range: 200px to 800px</li>
+            <li>The crop box inside can still be resized independently</li>
+          </ul>
         </Typography>
       </Alert>
     </Box>
