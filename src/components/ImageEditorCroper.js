@@ -1,6 +1,7 @@
 import {
   AspectRatio as AspectRatioIcon,
   Brush as BrushIcon,
+  CloudUpload as CloudUploadIcon,
   ColorLens as ColorLensIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
@@ -9,11 +10,11 @@ import {
   FilterVintage as FilterVintageIcon,
   Grain as GrainIcon,
   Height as HeightIcon,
+  History as HistoryIcon,
   InvertColors as InvertColorsIcon,
   RestartAlt as RestartAltIcon,
   RotateLeft as RotateLeftIcon,
   RotateRight as RotateRightIcon,
-  Save as SaveIcon,
   Tune as TuneIcon,
   Upload as UploadIcon,
   ZoomIn as ZoomInIcon,
@@ -30,11 +31,18 @@ import {
   CardActions,
   CardContent,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   Grid,
   IconButton,
+  LinearProgress,
   Paper,
   Slider,
+  Snackbar,
   Stack,
   Tooltip,
   Typography,
@@ -138,6 +146,7 @@ const FILTERS = [
 
 export default function ImageEditorCropper() {
   const [imgSrc, setImgSrc] = useState(null);
+  const [originalFile, setOriginalFile] = useState(null); // Store original file for metadata
   const previewCanvasRef = useRef(null);
   const imgRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -147,6 +156,7 @@ export default function ImageEditorCropper() {
   const [rotate, setRotate] = useState(0);
   const [aspect, setAspect] = useState(undefined);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [savedEdits, setSavedEdits] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('none');
@@ -158,6 +168,8 @@ export default function ImageEditorCropper() {
     blur: 0,
     hue: 0,
   });
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
+  const [uploadDialog, setUploadDialog] = useState({ open: false, imageData: null });
 
   // New state for container resizing
   const [containerHeight, setContainerHeight] = useState(400);
@@ -166,10 +178,18 @@ export default function ImageEditorCropper() {
 
   function onSelectFile(e) {
     if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      setOriginalFile(file);
       setCrop(null);
       const reader = new FileReader();
       reader.addEventListener('load', () => setImgSrc(reader.result?.toString() || ''));
-      reader.readAsDataURL(e.target.files[0]);
+      reader.readAsDataURL(file);
+
+      setSnackbar({
+        open: true,
+        message: `Image "${file.name}" loaded successfully`,
+        severity: 'success',
+      });
     }
   }
 
@@ -198,14 +218,17 @@ export default function ImageEditorCropper() {
     return filter?.style || {};
   };
 
-  async function onDownloadCropClick() {
+  // Function to generate the final edited image as Blob/File
+  const generateEditedImage = async () => {
     const image = imgRef.current;
     const previewCanvas = previewCanvasRef.current;
+
     if (!image || !previewCanvas || !completedCrop) {
-      throw new Error('Crop canvas does not exist');
+      throw new Error('No image or crop data available');
     }
 
     setIsProcessing(true);
+    setUploadProgress(30);
 
     const scaleX = image.naturalWidth / image.width;
     const scaleY = image.naturalHeight / image.height;
@@ -216,39 +239,172 @@ export default function ImageEditorCropper() {
       throw new Error('No 2d context');
     }
 
-    ctx.drawImage(
-      previewCanvas,
-      0,
-      0,
-      previewCanvas.width,
-      previewCanvas.height,
-      0,
-      0,
-      offscreen.width,
-      offscreen.height
-    );
+    // Apply filters to the canvas context
+    if (selectedFilter !== 'none' || Object.values(customFilters).some((v) => v !== 100 && v !== 0)) {
+      // Create a temporary canvas to apply filters
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = previewCanvas.width;
+      tempCanvas.height = previewCanvas.height;
+      const tempCtx = tempCanvas.getContext('2d');
 
+      // Draw the preview with filters
+      tempCtx.filter = getFilterStyle().filter;
+      tempCtx.drawImage(previewCanvas, 0, 0);
+
+      // Draw to offscreen canvas
+      ctx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height, 0, 0, offscreen.width, offscreen.height);
+    } else {
+      ctx.drawImage(
+        previewCanvas,
+        0,
+        0,
+        previewCanvas.width,
+        previewCanvas.height,
+        0,
+        0,
+        offscreen.width,
+        offscreen.height
+      );
+    }
+
+    setUploadProgress(60);
+
+    // Generate blob
     const blob = await offscreen.convertToBlob({
       type: 'image/png',
       quality: 0.95,
     });
 
-    // Create download link
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `cropped-image-${Date.now()}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setUploadProgress(90);
 
+    // Create a File object from the blob
+    const fileName = originalFile
+      ? `edited-${originalFile.name.split('.')[0]}-${Date.now()}.png`
+      : `edited-image-${Date.now()}.png`;
+
+    const file = new File([blob], fileName, { type: 'image/png' });
+
+    setUploadProgress(100);
     setIsProcessing(false);
+
+    return { blob, file, url: URL.createObjectURL(blob) };
+  };
+
+  async function onDownloadCropClick() {
+    try {
+      const { url } = await generateEditedImage();
+
+      // Create download link
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = originalFile ? `edited-${originalFile.name.split('.')[0]}.png` : `cropped-image-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setSnackbar({
+        open: true,
+        message: 'Image downloaded successfully!',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Download error:', error);
+      setSnackbar({
+        open: true,
+        message: `Error downloading image: ${error.message}`,
+        severity: 'error',
+      });
+    }
   }
 
-  // Save current edit to history
-  const handleSaveEdit = () => {
-    if (completedCrop && imgSrc) {
+  // Upload to backend function
+  const handleUploadToBackend = async () => {
+    try {
+      const { file } = await generateEditedImage();
+
+      // Show upload confirmation dialog
+      setUploadDialog({
+        open: true,
+        imageData: {
+          file,
+          preview: URL.createObjectURL(file),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        },
+      });
+    } catch (error) {
+      console.error('Upload preparation error:', error);
+      setSnackbar({
+        open: true,
+        message: `Error preparing image for upload: ${error.message}`,
+        severity: 'error',
+      });
+    }
+  };
+
+  // Actual upload function - replace with your backend API
+  const performUpload = async (file, metadata = {}) => {
+    try {
+      setUploadProgress(0);
+      setIsProcessing(true);
+
+      // Create FormData for upload
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append(
+        'metadata',
+        JSON.stringify({
+          originalName: originalFile?.name,
+          originalSize: originalFile?.size,
+          edits: {
+            scale,
+            rotate,
+            filter: selectedFilter,
+            customFilters,
+            crop: completedCrop,
+            aspect,
+          },
+          ...metadata,
+        })
+      );
+
+      // Simulate upload progress (replace with actual XMLHttpRequest for real progress)
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 95) {
+            clearInterval(progressInterval);
+            return 95;
+          }
+          return prev + 5;
+        });
+      }, 200);
+
+      // TODO: Replace with your actual API endpoint
+      const response = await fetch('https://your-backend-api.com/upload', {
+        method: 'POST',
+        body: formData,
+        // Don't set Content-Type header - browser will set it with boundary for FormData
+      });
+
+      clearInterval(progressInterval);
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      setUploadProgress(100);
+
+      setSnackbar({
+        open: true,
+        message: 'Image uploaded successfully!',
+        severity: 'success',
+      });
+
+      // Save this edit to history with upload info
       const editData = {
         id: Date.now(),
         timestamp: new Date().toLocaleString(),
@@ -258,12 +414,60 @@ export default function ImageEditorCropper() {
         filter: selectedFilter,
         customFilters: { ...customFilters },
         aspect,
-        preview: previewCanvasRef.current?.toDataURL(),
+        uploaded: true,
+        uploadUrl: result.url || result.imageUrl,
+        fileName: file.name,
       };
-      setSavedEdits([editData, ...savedEdits].slice(0, 10)); // Keep last 10 edits
+      setSavedEdits([editData, ...savedEdits].slice(0, 10));
 
-      // Show success message
-      alert('Edit saved to history!');
+      return result;
+    } catch (error) {
+      console.error('Upload error:', error);
+      setSnackbar({
+        open: true,
+        message: `Upload failed: ${error.message}`,
+        severity: 'error',
+      });
+      throw error;
+    } finally {
+      setIsProcessing(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // Save current edit to history (local only)
+  const handleSaveEdit = async () => {
+    if (completedCrop && imgSrc) {
+      try {
+        const { url } = await generateEditedImage();
+
+        const editData = {
+          id: Date.now(),
+          timestamp: new Date().toLocaleString(),
+          crop: completedCrop,
+          scale,
+          rotate,
+          filter: selectedFilter,
+          customFilters: { ...customFilters },
+          aspect,
+          preview: url,
+          fileName: originalFile?.name || 'image.png',
+        };
+
+        setSavedEdits([editData, ...savedEdits].slice(0, 10));
+
+        setSnackbar({
+          open: true,
+          message: 'Edit saved to history!',
+          severity: 'success',
+        });
+      } catch (error) {
+        setSnackbar({
+          open: true,
+          message: `Error saving edit: ${error.message}`,
+          severity: 'error',
+        });
+      }
     }
   };
 
@@ -276,10 +480,11 @@ export default function ImageEditorCropper() {
       setCustomFilters(edit.customFilters);
       setAspect(edit.aspect);
 
-      // Update crop if possible
-      if (imgRef.current && edit.crop) {
-        setCompletedCrop(edit.crop);
-      }
+      setSnackbar({
+        open: true,
+        message: 'Edit loaded successfully',
+        severity: 'info',
+      });
     }
   };
 
@@ -322,6 +527,7 @@ export default function ImageEditorCropper() {
     setCompletedCrop(null);
     setContainerHeight(400);
     handleResetFilters();
+    setOriginalFile(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -401,13 +607,22 @@ export default function ImageEditorCropper() {
     setContainerHeight(Math.max(200, Math.min(800, value)));
   };
 
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+
+  const handleCloseDialog = () => {
+    setUploadDialog({ open: false, imageData: null });
+    setUploadProgress(0);
+  };
+
   return (
     <Box sx={{ p: 3, maxWidth: '1400px', margin: '0 auto' }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 600, color: 'primary.main' }}>
-        Advanced Image Editor with Filters
+        Advanced Image Editor with Upload
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Crop, apply filters, adjust colors, and save your edits
+        Crop, apply filters, adjust colors, and upload to backend
       </Typography>
 
       <Card elevation={3} sx={{ mt: 3 }}>
@@ -425,12 +640,26 @@ export default function ImageEditorCropper() {
                     Choose Image
                     <input ref={fileInputRef} type="file" accept="image/*" onChange={onSelectFile} hidden />
                   </Button>
-                  {imgSrc && (
+                  {imgSrc && originalFile && (
                     <Alert severity="success" sx={{ mt: 1 }}>
-                      Image loaded successfully
+                      <Typography variant="body2">
+                        <strong>{originalFile.name}</strong>
+                        <br />
+                        Size: {(originalFile.size / 1024).toFixed(2)} KB
+                      </Typography>
                     </Alert>
                   )}
                 </Box>
+
+                {/* Upload Progress */}
+                {isProcessing && uploadProgress > 0 && (
+                  <Box>
+                    <Typography variant="body2" gutterBottom>
+                      {uploadProgress < 100 ? 'Processing...' : 'Complete!'} {uploadProgress}%
+                    </Typography>
+                    <LinearProgress variant="determinate" value={uploadProgress} />
+                  </Box>
+                )}
 
                 {/* Container Height Control */}
                 {imgSrc && (
@@ -451,9 +680,6 @@ export default function ImageEditorCropper() {
                       />
                       <HeightIcon color="action" sx={{ transform: 'rotate(180deg)' }} />
                     </Stack>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                      Or drag the bottom border of the image container
-                    </Typography>
                   </Box>
                 )}
 
@@ -497,9 +723,9 @@ export default function ImageEditorCropper() {
                           <FilterIcon />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="Save Edit">
+                      <Tooltip title="Save to History">
                         <IconButton color="success" onClick={handleSaveEdit} disabled={!imgSrc || !completedCrop}>
-                          <SaveIcon />
+                          <HistoryIcon />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Reset All">
@@ -713,9 +939,9 @@ export default function ImageEditorCropper() {
                 {/* Saved Edits History */}
                 {savedEdits.length > 0 && (
                   <Accordion>
-                    <AccordionSummary expandIcon={<SaveIcon />}>
+                    <AccordionSummary expandIcon={<HistoryIcon />}>
                       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                        Saved Edits ({savedEdits.length})
+                        Edit History ({savedEdits.length})
                       </Typography>
                     </AccordionSummary>
                     <AccordionDetails>
@@ -724,7 +950,12 @@ export default function ImageEditorCropper() {
                           <Paper
                             key={edit.id}
                             variant="outlined"
-                            sx={{ p: 1, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                            sx={{
+                              p: 1,
+                              cursor: 'pointer',
+                              '&:hover': { bgcolor: 'action.hover' },
+                              border: edit.uploaded ? '1px solid #4caf50' : 'none',
+                            }}
                             onClick={() => handleLoadEdit(edit)}
                           >
                             <Stack direction="row" spacing={1} alignItems="center">
@@ -740,8 +971,16 @@ export default function ImageEditorCropper() {
                                   {edit.timestamp}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  Filter: {edit.filter} | Scale: {edit.scale}x
+                                  {edit.fileName} | {edit.filter} | {edit.scale}x
                                 </Typography>
+                                {edit.uploaded && (
+                                  <Chip
+                                    size="small"
+                                    label="Uploaded"
+                                    color="success"
+                                    sx={{ mt: 0.5, height: 20, fontSize: '0.625rem' }}
+                                  />
+                                )}
                               </Box>
                             </Stack>
                           </Paper>
@@ -977,46 +1216,115 @@ export default function ImageEditorCropper() {
             Reset All
           </Button>
           <Button
-            startIcon={<SaveIcon />}
+            startIcon={<HistoryIcon />}
             onClick={handleSaveEdit}
             disabled={!imgSrc || !completedCrop}
             variant="outlined"
-            color="success"
+            color="info"
           >
-            Save Edit
+            Save to History
           </Button>
           <Button
             startIcon={<DownloadIcon />}
             onClick={() => onDownloadCropClick()}
             disabled={!imgSrc || !completedCrop || isProcessing}
+            variant="outlined"
+            color="secondary"
+          >
+            Download
+          </Button>
+          <Button
+            startIcon={<CloudUploadIcon />}
+            onClick={handleUploadToBackend}
+            disabled={!imgSrc || !completedCrop || isProcessing}
             variant="contained"
             color="primary"
             sx={{ minWidth: 150 }}
           >
-            {isProcessing ? 'Processing...' : 'Download Image'}
+            {isProcessing ? 'Processing...' : 'Upload to Server'}
           </Button>
         </CardActions>
       </Card>
 
+      {/* Upload Confirmation Dialog */}
+      <Dialog open={uploadDialog.open} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Confirm Upload</DialogTitle>
+        <DialogContent>
+          <DialogContentText>You are about to upload this edited image to the server.</DialogContentText>
+          {uploadDialog.imageData && (
+            <Box sx={{ mt: 2, textAlign: 'center' }}>
+              <img
+                src={uploadDialog.imageData.preview}
+                alt="Preview"
+                style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain' }}
+              />
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                <strong>Name:</strong> {uploadDialog.imageData.name}
+                <br />
+                <strong>Size:</strong> {(uploadDialog.imageData.size / 1024).toFixed(2)} KB
+                <br />
+                <strong>Type:</strong> {uploadDialog.imageData.type}
+              </Typography>
+            </Box>
+          )}
+          {isProcessing && (
+            <Box sx={{ mt: 2 }}>
+              <LinearProgress variant="determinate" value={uploadProgress} />
+              <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
+                Uploading: {uploadProgress}%
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog} disabled={isProcessing}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              performUpload(uploadDialog.imageData.file);
+              handleCloseDialog();
+            }}
+            variant="contained"
+            color="primary"
+            disabled={isProcessing}
+          >
+            Confirm Upload
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+
       {/* Help Text */}
       <Alert severity="info" sx={{ mt: 2 }}>
         <Typography variant="body2">
-          <strong>New Features:</strong>
+          <strong>Upload Features:</strong>
           <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
             <li>
-              <strong>Filters:</strong> Apply preset filters or create custom ones
+              <strong>Save to History:</strong> Store edits locally for later use
             </li>
             <li>
-              <strong>Save Button:</strong> Save your edits to history (click the save icon or button)
+              <strong>Download:</strong> Save the edited image to your device
             </li>
             <li>
-              <strong>Edit History:</strong> Access your last 10 saved edits from the accordion
+              <strong>Upload to Server:</strong> Send the final edited image to your backend
             </li>
             <li>
-              <strong>Custom Adjustments:</strong> Fine-tune brightness, contrast, saturation, and more
+              <strong>Upload includes:</strong> Image file + edit metadata (crop, filters, rotation)
             </li>
             <li>
-              <strong>Filter Intensity:</strong> Adjust the strength of preset filters
+              <strong>Format:</strong> PNG with all filters baked into the image
             </li>
           </ul>
         </Typography>
