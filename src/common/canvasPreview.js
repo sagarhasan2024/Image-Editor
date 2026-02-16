@@ -1,6 +1,5 @@
-const TO_RADIANS = Math.PI / 180;
-
-export async function canvasPreview(image, canvas, crop, scale = 1, rotate = 0) {
+// canvasPreviewWithFilters.js
+export async function canvasPreviewWithFilters(image, canvas, crop, scale = 1, rotate = 0, filterStyle = 'none') {
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -9,29 +8,34 @@ export async function canvasPreview(image, canvas, crop, scale = 1, rotate = 0) 
 
   const scaleX = image.naturalWidth / image.width;
   const scaleY = image.naturalHeight / image.height;
-  const pixelRatio = window.devicePixelRatio;
 
-  canvas.width = Math.floor(crop.width * scaleX * pixelRatio);
-  canvas.height = Math.floor(crop.height * scaleY * pixelRatio);
+  canvas.width = crop.width;
+  canvas.height = crop.height;
 
-  ctx.scale(pixelRatio, pixelRatio);
-  ctx.imageSmoothingQuality = 'high';
+  ctx.clearRect(0, 0, crop.width, crop.height);
 
-  const cropX = crop.x * scaleX;
-  const cropY = crop.y * scaleY;
-
-  const rotateRads = rotate * TO_RADIANS;
-  const centerX = image.naturalWidth / 2;
-  const centerY = image.naturalHeight / 2;
+  // Apply filter to canvas context
+  ctx.filter = filterStyle;
 
   ctx.save();
 
-  ctx.translate(-cropX, -cropY);
-  ctx.translate(centerX, centerY);
-  ctx.rotate(rotateRads);
+  // Move to center of canvas for rotation
+  ctx.translate(crop.width / 2, crop.height / 2);
+  ctx.rotate((rotate * Math.PI) / 180);
   ctx.scale(scale, scale);
-  ctx.translate(-centerX, -centerY);
-  ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, image.naturalWidth, image.naturalHeight);
+  ctx.translate(-crop.width / 2, -crop.height / 2);
+
+  ctx.drawImage(
+    image,
+    crop.x / scaleX,
+    crop.y / scaleY,
+    crop.width / scaleX,
+    crop.height / scaleY,
+    0,
+    0,
+    crop.width,
+    crop.height
+  );
 
   ctx.restore();
 }
