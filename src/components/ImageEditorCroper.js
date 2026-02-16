@@ -1,16 +1,28 @@
 import {
   AspectRatio as AspectRatioIcon,
+  Brush as BrushIcon,
+  ColorLens as ColorLensIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
+  FilterHdr as FilterHdrIcon,
+  Filter as FilterIcon,
+  FilterVintage as FilterVintageIcon,
+  Grain as GrainIcon,
   Height as HeightIcon,
+  InvertColors as InvertColorsIcon,
   RestartAlt as RestartAltIcon,
   RotateLeft as RotateLeftIcon,
   RotateRight as RotateRightIcon,
+  Save as SaveIcon,
+  Tune as TuneIcon,
   Upload as UploadIcon,
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
 } from '@mui/icons-material';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -60,6 +72,70 @@ const ASPECT_RATIOS = [
   { label: '2:3', value: 2 / 3 },
 ];
 
+// Filter presets
+const FILTERS = [
+  {
+    name: 'Normal',
+    value: 'none',
+    icon: <TuneIcon />,
+    style: {},
+  },
+  {
+    name: 'Grayscale',
+    value: 'grayscale',
+    icon: <InvertColorsIcon />,
+    style: { filter: 'grayscale(100%)' },
+  },
+  {
+    name: 'Sepia',
+    value: 'sepia',
+    icon: <FilterVintageIcon />,
+    style: { filter: 'sepia(100%)' },
+  },
+  {
+    name: 'Blur',
+    value: 'blur',
+    icon: <GrainIcon />,
+    style: { filter: 'blur(2px)' },
+  },
+  {
+    name: 'Bright',
+    value: 'brightness',
+    icon: <BrushIcon />,
+    style: { filter: 'brightness(150%)' },
+  },
+  {
+    name: 'Contrast',
+    value: 'contrast',
+    icon: <FilterHdrIcon />,
+    style: { filter: 'contrast(200%)' },
+  },
+  {
+    name: 'Warm',
+    value: 'warm',
+    icon: <ColorLensIcon />,
+    style: { filter: 'sepia(50%) hue-rotate(15deg)' },
+  },
+  {
+    name: 'Cool',
+    value: 'cool',
+    icon: <ColorLensIcon sx={{ color: 'blue' }} />,
+    style: { filter: 'hue-rotate(180deg) saturate(150%)' },
+  },
+  {
+    name: 'Vintage',
+    value: 'vintage',
+    icon: <FilterIcon />,
+    style: { filter: 'sepia(50%) contrast(120%) brightness(110%)' },
+  },
+  {
+    name: 'Cinematic',
+    value: 'cinematic',
+    icon: <FilterIcon />,
+    style: { filter: 'contrast(120%) saturate(120%) brightness(90%)' },
+  },
+];
+
 export default function ImageEditorCropper() {
   const [imgSrc, setImgSrc] = useState(null);
   const previewCanvasRef = useRef(null);
@@ -71,9 +147,20 @@ export default function ImageEditorCropper() {
   const [rotate, setRotate] = useState(0);
   const [aspect, setAspect] = useState(undefined);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [savedEdits, setSavedEdits] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('none');
+  const [filterIntensity, setFilterIntensity] = useState(100);
+  const [customFilters, setCustomFilters] = useState({
+    brightness: 100,
+    contrast: 100,
+    saturation: 100,
+    blur: 0,
+    hue: 0,
+  });
 
   // New state for container resizing
-  const [containerHeight, setContainerHeight] = useState(400); // Initial height in px
+  const [containerHeight, setContainerHeight] = useState(400);
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef(null);
 
@@ -92,6 +179,24 @@ export default function ImageEditorCropper() {
       setCrop(centerAspectCrop(width, height, aspect));
     }
   }
+
+  // Function to apply filter to image
+  const getFilterStyle = () => {
+    if (selectedFilter === 'none') {
+      return {
+        filter: `
+          brightness(${customFilters.brightness}%)
+          contrast(${customFilters.contrast}%)
+          saturate(${customFilters.saturation}%)
+          blur(${customFilters.blur}px)
+          hue-rotate(${customFilters.hue}deg)
+        `,
+      };
+    }
+
+    const filter = FILTERS.find((f) => f.value === selectedFilter);
+    return filter?.style || {};
+  };
 
   async function onDownloadCropClick() {
     const image = imgRef.current;
@@ -141,6 +246,64 @@ export default function ImageEditorCropper() {
     setIsProcessing(false);
   }
 
+  // Save current edit to history
+  const handleSaveEdit = () => {
+    if (completedCrop && imgSrc) {
+      const editData = {
+        id: Date.now(),
+        timestamp: new Date().toLocaleString(),
+        crop: completedCrop,
+        scale,
+        rotate,
+        filter: selectedFilter,
+        customFilters: { ...customFilters },
+        aspect,
+        preview: previewCanvasRef.current?.toDataURL(),
+      };
+      setSavedEdits([editData, ...savedEdits].slice(0, 10)); // Keep last 10 edits
+
+      // Show success message
+      alert('Edit saved to history!');
+    }
+  };
+
+  // Load saved edit
+  const handleLoadEdit = (edit) => {
+    if (edit) {
+      setScale(edit.scale);
+      setRotate(edit.rotate);
+      setSelectedFilter(edit.filter);
+      setCustomFilters(edit.customFilters);
+      setAspect(edit.aspect);
+
+      // Update crop if possible
+      if (imgRef.current && edit.crop) {
+        setCompletedCrop(edit.crop);
+      }
+    }
+  };
+
+  // Apply filter and intensity
+  const handleFilterChange = (filterValue) => {
+    setSelectedFilter(filterValue);
+    if (filterValue !== 'none') {
+      setFilterIntensity(100);
+    }
+  };
+
+  // Reset all filters and adjustments
+  const handleResetFilters = () => {
+    setSelectedFilter('none');
+    setFilterIntensity(100);
+    setCustomFilters({
+      brightness: 100,
+      contrast: 100,
+      saturation: 100,
+      blur: 0,
+      hue: 0,
+    });
+  };
+
   useDebounceEffect(
     async () => {
       if (completedCrop?.width && completedCrop?.height && imgRef.current && previewCanvasRef.current) {
@@ -148,7 +311,7 @@ export default function ImageEditorCropper() {
       }
     },
     100,
-    [completedCrop, scale, rotate]
+    [completedCrop, scale, rotate, selectedFilter, filterIntensity, customFilters]
   );
 
   const handleReset = () => {
@@ -157,7 +320,8 @@ export default function ImageEditorCropper() {
     setAspect(undefined);
     setCrop(null);
     setCompletedCrop(null);
-    setContainerHeight(400); // Reset container height
+    setContainerHeight(400);
+    handleResetFilters();
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -213,7 +377,7 @@ export default function ImageEditorCropper() {
       const handleMouseMove = (moveEvent) => {
         const currentY = moveEvent.clientY || moveEvent.touches[0].clientY;
         const deltaY = currentY - startY;
-        const newHeight = Math.max(200, Math.min(800, startHeight + deltaY)); // Min 200px, Max 800px
+        const newHeight = Math.max(200, Math.min(800, startHeight + deltaY));
         setContainerHeight(newHeight);
       };
 
@@ -233,7 +397,6 @@ export default function ImageEditorCropper() {
     [containerHeight]
   );
 
-  // Handle container resize with slider
   const handleContainerHeightChange = (value) => {
     setContainerHeight(Math.max(200, Math.min(800, value)));
   };
@@ -241,10 +404,10 @@ export default function ImageEditorCropper() {
   return (
     <Box sx={{ p: 3, maxWidth: '1400px', margin: '0 auto' }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 600, color: 'primary.main' }}>
-        Image Editor with Resizable Container
+        Advanced Image Editor with Filters
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Drag the bottom border of the image container to resize it vertically
+        Crop, apply filters, adjust colors, and save your edits
       </Typography>
 
       <Card elevation={3} sx={{ mt: 3 }}>
@@ -325,6 +488,20 @@ export default function ImageEditorCropper() {
                           <RotateRightIcon />
                         </IconButton>
                       </Tooltip>
+                      <Tooltip title="Filters">
+                        <IconButton
+                          color={showFilters ? 'secondary' : 'primary'}
+                          onClick={() => setShowFilters(!showFilters)}
+                          disabled={!imgSrc}
+                        >
+                          <FilterIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Save Edit">
+                        <IconButton color="success" onClick={handleSaveEdit} disabled={!imgSrc || !completedCrop}>
+                          <SaveIcon />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="Reset All">
                         <IconButton color="error" onClick={handleReset} disabled={!imgSrc}>
                           <RestartAltIcon />
@@ -399,6 +576,180 @@ export default function ImageEditorCropper() {
                     </Stack>
                   </Box>
                 )}
+
+                {/* Filters Section */}
+                {showFilters && imgSrc && (
+                  <Accordion defaultExpanded>
+                    <AccordionSummary expandIcon={<FilterIcon />}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                        Image Filters
+                      </Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={2}>
+                        {/* Filter Presets */}
+                        <Box>
+                          <Typography variant="body2" gutterBottom>
+                            Preset Filters
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {FILTERS.map((filter) => (
+                              <Tooltip key={filter.name} title={filter.name}>
+                                <Chip
+                                  label={filter.name}
+                                  onClick={() => handleFilterChange(filter.value)}
+                                  color={selectedFilter === filter.value ? 'secondary' : 'default'}
+                                  variant={selectedFilter === filter.value ? 'filled' : 'outlined'}
+                                  icon={filter.icon}
+                                  sx={{ mb: 1 }}
+                                />
+                              </Tooltip>
+                            ))}
+                          </Stack>
+                        </Box>
+
+                        {/* Filter Intensity (for preset filters) */}
+                        {selectedFilter !== 'none' && (
+                          <Box>
+                            <Typography variant="body2" gutterBottom>
+                              Filter Intensity: {filterIntensity}%
+                            </Typography>
+                            <Slider
+                              value={filterIntensity}
+                              onChange={(_, value) => setFilterIntensity(value)}
+                              min={0}
+                              max={200}
+                              step={5}
+                              marks
+                              valueLabelDisplay="auto"
+                            />
+                          </Box>
+                        )}
+
+                        {/* Custom Filter Controls */}
+                        <Typography variant="body2" gutterBottom sx={{ mt: 1 }}>
+                          Custom Adjustments
+                        </Typography>
+
+                        <Box>
+                          <Typography variant="caption">Brightness</Typography>
+                          <Slider
+                            value={customFilters.brightness}
+                            onChange={(_, value) => setCustomFilters({ ...customFilters, brightness: value })}
+                            min={0}
+                            max={200}
+                            step={5}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(value) => `${value}%`}
+                          />
+                        </Box>
+
+                        <Box>
+                          <Typography variant="caption">Contrast</Typography>
+                          <Slider
+                            value={customFilters.contrast}
+                            onChange={(_, value) => setCustomFilters({ ...customFilters, contrast: value })}
+                            min={0}
+                            max={200}
+                            step={5}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(value) => `${value}%`}
+                          />
+                        </Box>
+
+                        <Box>
+                          <Typography variant="caption">Saturation</Typography>
+                          <Slider
+                            value={customFilters.saturation}
+                            onChange={(_, value) => setCustomFilters({ ...customFilters, saturation: value })}
+                            min={0}
+                            max={200}
+                            step={5}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(value) => `${value}%`}
+                          />
+                        </Box>
+
+                        <Box>
+                          <Typography variant="caption">Blur</Typography>
+                          <Slider
+                            value={customFilters.blur}
+                            onChange={(_, value) => setCustomFilters({ ...customFilters, blur: value })}
+                            min={0}
+                            max={10}
+                            step={0.5}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(value) => `${value}px`}
+                          />
+                        </Box>
+
+                        <Box>
+                          <Typography variant="caption">Hue Rotation</Typography>
+                          <Slider
+                            value={customFilters.hue}
+                            onChange={(_, value) => setCustomFilters({ ...customFilters, hue: value })}
+                            min={0}
+                            max={360}
+                            step={15}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(value) => `${value}°`}
+                          />
+                        </Box>
+
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={handleResetFilters}
+                          startIcon={<RestartAltIcon />}
+                          fullWidth
+                        >
+                          Reset Filters
+                        </Button>
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+
+                {/* Saved Edits History */}
+                {savedEdits.length > 0 && (
+                  <Accordion>
+                    <AccordionSummary expandIcon={<SaveIcon />}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                        Saved Edits ({savedEdits.length})
+                      </Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={1}>
+                        {savedEdits.map((edit) => (
+                          <Paper
+                            key={edit.id}
+                            variant="outlined"
+                            sx={{ p: 1, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                            onClick={() => handleLoadEdit(edit)}
+                          >
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              {edit.preview && (
+                                <Box
+                                  component="img"
+                                  src={edit.preview}
+                                  sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 0.5 }}
+                                />
+                              )}
+                              <Box sx={{ flex: 1 }}>
+                                <Typography variant="caption" display="block">
+                                  {edit.timestamp}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Filter: {edit.filter} | Scale: {edit.scale}x
+                                </Typography>
+                              </Box>
+                            </Stack>
+                          </Paper>
+                        ))}
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
               </Stack>
             </Grid>
 
@@ -442,6 +793,7 @@ export default function ImageEditorCropper() {
                           maxWidth: '100%',
                           maxHeight: '100%',
                           display: 'block',
+                          ...getFilterStyle(),
                         }}
                         onLoad={onImageLoad}
                       />
@@ -500,6 +852,29 @@ export default function ImageEditorCropper() {
                       <HeightIcon sx={{ fontSize: '0.875rem' }} />
                       {containerHeight}px
                     </Box>
+
+                    {/* Active Filter Indicator */}
+                    {selectedFilter !== 'none' && (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: 10,
+                          left: 10,
+                          backgroundColor: 'secondary.main',
+                          color: 'white',
+                          px: 1.5,
+                          py: 0.5,
+                          borderRadius: 1,
+                          fontSize: '0.75rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.5,
+                        }}
+                      >
+                        <FilterIcon sx={{ fontSize: '0.875rem' }} />
+                        {FILTERS.find((f) => f.value === selectedFilter)?.name || selectedFilter}
+                      </Box>
+                    )}
 
                     {/* Resize Instructions */}
                     <Box
@@ -602,6 +977,15 @@ export default function ImageEditorCropper() {
             Reset All
           </Button>
           <Button
+            startIcon={<SaveIcon />}
+            onClick={handleSaveEdit}
+            disabled={!imgSrc || !completedCrop}
+            variant="outlined"
+            color="success"
+          >
+            Save Edit
+          </Button>
+          <Button
             startIcon={<DownloadIcon />}
             onClick={() => onDownloadCropClick()}
             disabled={!imgSrc || !completedCrop || isProcessing}
@@ -609,7 +993,7 @@ export default function ImageEditorCropper() {
             color="primary"
             sx={{ minWidth: 150 }}
           >
-            {isProcessing ? 'Processing...' : 'Download Cropped'}
+            {isProcessing ? 'Processing...' : 'Download Image'}
           </Button>
         </CardActions>
       </Card>
@@ -617,15 +1001,23 @@ export default function ImageEditorCropper() {
       {/* Help Text */}
       <Alert severity="info" sx={{ mt: 2 }}>
         <Typography variant="body2">
-          <strong>Container Resize Features:</strong>
+          <strong>New Features:</strong>
           <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
             <li>
-              Drag the <strong>bottom border</strong> (grey/blue bar) up/down to resize container height
+              <strong>Filters:</strong> Apply preset filters or create custom ones
             </li>
-            <li>Use the height slider in the controls panel for precise adjustment</li>
-            <li>Works with both mouse and touch devices</li>
-            <li>Container height range: 200px to 800px</li>
-            <li>The crop box inside can still be resized independently</li>
+            <li>
+              <strong>Save Button:</strong> Save your edits to history (click the save icon or button)
+            </li>
+            <li>
+              <strong>Edit History:</strong> Access your last 10 saved edits from the accordion
+            </li>
+            <li>
+              <strong>Custom Adjustments:</strong> Fine-tune brightness, contrast, saturation, and more
+            </li>
+            <li>
+              <strong>Filter Intensity:</strong> Adjust the strength of preset filters
+            </li>
           </ul>
         </Typography>
       </Alert>
